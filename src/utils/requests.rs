@@ -56,38 +56,34 @@ fn parse_comments<'a>(data: &'a Value) -> Option<Vec<Comment<'a>>> {
         .as_array()?
         .iter()
         .flat_map(|res| {
-            res.get("reloadContinuationItemsCommand")
-                .or_else(|| res.get("appendContinuationItemsAction"))
-                .and_then(|c| c.get("continuationItems"))
+            res.pointer("/reloadContinuationItemsCommand/continuationItems")
+                .or_else(|| res.pointer("/appendContinuationItemsAction/continuationItems"))
                 .and_then(|ci| ci.as_array())
                 .into_iter()
                 .flatten()
                 .filter_map(|item| {
-                    item.get("commentThreadRenderer")
-                        .and_then(|th| th.get("commentViewModel"))
-                        .and_then(|vm| vm.get("commentViewModel"))
-                        .and_then(|vm| vm.get("commentId"))
+                    item.pointer(
+                        "/commentThreadRenderer/commentViewModel/commentViewModel/commentId",
+                    )
                 })
         })
         .collect();
 
     let mut payloads = data
-        .get("frameworkUpdates")?
-        .get("entityBatchUpdate")?
-        .get("mutations")?
+        .pointer("/frameworkUpdates/entityBatchUpdate/mutations")?
         .as_array()
-        .and_then(|muts| Some(muts.iter().flat_map(|mu| mu.get("payload"))))
-        .into_iter()
-        .flatten()
-        .filter_map(|pl| pl.get("commentEntityPayload"))
-        .filter_map(|cep| {
-            let properties = cep.get("properties")?;
+        .and_then(|muts| {
+            Some(muts.iter().filter_map(|mu| {
+                mu.pointer("/payload/commentEntityPayload").and_then(|cep| {
+                    let properties = cep.get("properties")?;
 
-            let id = properties.get("commentId")?.as_str()?;
-            let author = cep.get("author")?.get("displayName")?.as_str()?;
-            let text = properties.get("content")?.get("content")?.as_str()?;
-            Some(Comment { id, author, text })
-        });
+                    let id = properties.get("commentId")?.as_str()?;
+                    let author = cep.get("author")?.get("displayName")?.as_str()?;
+                    let text = properties.get("content")?.get("content")?.as_str()?;
+                    Some(Comment { id, author, text })
+                })
+            }))
+        })?;
 
     let comments = comment_ids
         .iter()
