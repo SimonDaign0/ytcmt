@@ -152,17 +152,15 @@ fn comments_extension_token(data: &Value) -> Option<String> {
         .as_array()?
         .last()
         .and_then(|item| {
-            item.get("appendContinuationItemsAction")
-                .or_else(|| item.get("reloadContinuationItemsCommand"))
+            item.pointer("/appendContinuationItemsAction/continuationItems")
+                .or_else(|| item.pointer("/reloadContinuationItemsCommand/continuationItems"))
         })?
-        .get("continuationItems")?
         .as_array()?
         .last()?
-        .get("continuationItemRenderer")?
-        .get("continuationEndpoint")?
-        .get("continuationCommand")?
-        .get("token")
-        .and_then(|value| value.as_str().and_then(|val| Some(val.to_string())));
+        .pointer("/continuationItemRenderer/continuationEndpoint/continuationCommand/token")?
+        .as_str()
+        .and_then(|v| Some(v.to_string()));
+
     token
 }
 
@@ -176,22 +174,19 @@ fn comments_section_token(html: &str) -> Option<String> {
     let data: Value = serde_json::from_str(slice).ok()?;
 
     let token = data
-        .get("contents")?
-        .get("twoColumnWatchNextResults")?
-        .get("results")?
-        .get("results")?
-        .get("contents")?
+        .pointer("/contents/twoColumnWatchNextResults/results/results/contents")?
         .as_array()?
         .iter()
-        .find_map(|item| item.get("itemSectionRenderer"))?
-        .get("contents")?
+        .find_map(|item| item.pointer("/itemSectionRenderer/contents"))?
         .as_array()?
         .iter()
-        .find_map(|section_item| section_item.get("continuationItemRenderer"))?
-        .get("continuationEndpoint")?
-        .get("continuationCommand")?
-        .get("token")?
-        .as_str()?
+        .find_map(|section_item| {
+            section_item
+                .pointer(
+                    "/continuationItemRenderer/continuationEndpoint/continuationCommand/token",
+                )?
+                .as_str()
+        })?
         .to_string();
 
     Some(token)
