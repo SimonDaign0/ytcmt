@@ -75,11 +75,10 @@ fn parse_comments<'a>(data: &'a Value) -> Option<Vec<Comment<'a>>> {
         .and_then(|muts| {
             Some(muts.iter().filter_map(|mu| {
                 mu.pointer("/payload/commentEntityPayload").and_then(|cep| {
-                    let properties = cep.get("properties")?;
+                    let id = cep.pointer("/properties/commentId")?.as_str()?;
+                    let author = cep.pointer("/author/displayName")?.as_str()?;
+                    let text = cep.pointer("/properties/content/content")?.as_str()?;
 
-                    let id = properties.get("commentId")?.as_str()?;
-                    let author = cep.get("author")?.get("displayName")?.as_str()?;
-                    let text = properties.get("content")?.get("content")?.as_str()?;
                     Some(Comment { id, author, text })
                 })
             }))
@@ -126,14 +125,13 @@ async fn call_endpoint<'a>(
         },
         "videoId": video_id,
         "continuation": token
-    })
-    .to_string();
+    });
 
     let res = client
         .post(url)
         .header("Referer", watch_url)
         .header("Content-Type", "application/json")
-        .body(payload)
+        .body(payload.to_string())
         .send()
         .await?;
 
@@ -153,9 +151,8 @@ fn comments_extension_token(data: &Value) -> Option<String> {
         })?
         .as_array()?
         .last()?
-        .pointer("/continuationItemRenderer/continuationEndpoint/continuationCommand/token")?
-        .as_str()
-        .and_then(|v| Some(v.to_string()));
+        .pointer("/continuationItemRenderer/continuationEndpoint/continuationCommand/token")
+        .and_then(|tkn| Some(tkn.as_str()?.to_string()));
 
     token
 }
@@ -178,14 +175,11 @@ fn comments_section_token(html: &str) -> Option<String> {
         .iter()
         .find_map(|section_item| {
             section_item
-                .pointer(
-                    "/continuationItemRenderer/continuationEndpoint/continuationCommand/token",
-                )?
-                .as_str()
-        })?
-        .to_string();
+                .pointer("/continuationItemRenderer/continuationEndpoint/continuationCommand/token")
+                .and_then(|tkn| Some(tkn.as_str()?.to_string()))
+        });
 
-    Some(token)
+    token
 }
 
 fn wrap_brace<'a>(slice: &'a str) -> Option<&'a str> {
