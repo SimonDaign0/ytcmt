@@ -3,7 +3,7 @@ use serde_json::Value;
 use wreq::Client;
 use wreq_util::Emulation;
 
-use crate::schema::ContainerData;
+use crate::schema::ExtensionData;
 
 use crate::error::Error;
 
@@ -31,7 +31,6 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
         && current_page <= max_pages
     {
         let data = call_endpoint(client.clone(), &endpoint_url, video_id, &token).await?;
-
         if let Some(comments) = parse_comments(&data) {
             println!("{}{}", "## Page: ".red(), current_page);
             for comment in comments {
@@ -166,7 +165,7 @@ fn comments_section_token(html: &str) -> Option<String> {
 
     let slice = wrap_brace(html.get(brace_start..)?)?;
 
-    let section_container = serde_json::from_str::<ContainerData>(&slice).ok()?;
+    let section_container = serde_json::from_str::<ExtensionData>(&slice).ok()?;
 
     Some(section_container.into_token()?.into_owned())
 }
