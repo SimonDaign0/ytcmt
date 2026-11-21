@@ -3,6 +3,8 @@ use serde_json::Value;
 use wreq::Client;
 use wreq_util::Emulation;
 
+use crate::schema::ContainerData;
+
 use crate::error::Error;
 
 struct Comment<'a> {
@@ -164,22 +166,9 @@ fn comments_section_token(html: &str) -> Option<String> {
 
     let slice = wrap_brace(html.get(brace_start..)?)?;
 
-    let data: Value = serde_json::from_str(slice).ok()?;
+    let section_container = serde_json::from_str::<ContainerData>(&slice).ok()?;
 
-    let token = data
-        .pointer("/contents/twoColumnWatchNextResults/results/results/contents")?
-        .as_array()?
-        .iter()
-        .find_map(|item| item.pointer("/itemSectionRenderer/contents"))?
-        .as_array()?
-        .iter()
-        .find_map(|section_item| {
-            section_item
-                .pointer("/continuationItemRenderer/continuationEndpoint/continuationCommand/token")
-                .and_then(|tkn| Some(tkn.as_str()?.to_string()))
-        });
-
-    token
+    Some(section_container.into_token()?.into_owned())
 }
 
 fn wrap_brace<'a>(slice: &'a str) -> Option<&'a str> {
