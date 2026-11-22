@@ -2,7 +2,7 @@ use colored::Colorize;
 use wreq::Client;
 use wreq_util::Emulation;
 
-use crate::schema::comments_section::SectionData;
+use crate::schema::{comments_extension::ExtensionData, comments_section::SectionData};
 
 use crate::error::Error;
 
@@ -23,7 +23,7 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
     let mut current_token = cmt_section.token().map(|s| s.to_string());
     let mut current_page = 1;
 
-    /*  while let Some(token) = current_token.as_mut()
+    while let Some(token) = current_token.as_mut()
         && current_page <= max_pages
     {
         let data = call_endpoint(client.clone(), &endpoint_url, video_id, &token).await?;
@@ -41,7 +41,7 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
             );
         }
 
-        let next_token = ext_data.token();
+        let next_token = ext_data.extention_token();
         match next_token {
             Some(tkn) => {
                 token.clear();
@@ -50,7 +50,7 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
             None => current_token = None,
         }
         current_page += 1;
-    } */
+    }
 
     Ok(())
 }

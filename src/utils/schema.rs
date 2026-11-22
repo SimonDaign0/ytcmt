@@ -1,7 +1,7 @@
-pub enum DataType<'a> {
-    SectionData(comments_section::SectionData<'a>),
-    CommentExtension(initial_comments::ExtensionData<'a>),
-    ReplyExtension,
+pub struct Comment<'a> {
+    pub id: &'a str,
+    pub author: &'a str,
+    pub text: &'a str,
 }
 
 pub mod comments_section {
@@ -87,7 +87,8 @@ pub mod comments_section {
     }
 }
 
-pub mod initial_comments {
+pub mod comments_extension {
+    use crate::schema::Comment;
     use serde::Deserialize;
 
     impl<'a> ExtensionData<'a> {
@@ -180,6 +181,21 @@ pub mod initial_comments {
                         .as_ref()
                 })
         }
+
+        pub fn comments(&'a self) -> impl Iterator<Item = Comment<'a>> {
+            self.framework_updates
+                .entity_batch_update
+                .mutations
+                .iter()
+                .filter_map(|muta| {
+                    let pl = muta.payload.comment_entity_payload.as_ref()?;
+                    Some(Comment {
+                        id: pl.properties.comment_id.as_ref(),
+                        author: pl.author.display_name.as_ref(),
+                        text: pl.properties.content.content.as_ref(),
+                    })
+                })
+        }
     }
 
     #[derive(Debug, Deserialize)]
@@ -187,6 +203,7 @@ pub mod initial_comments {
     pub struct ExtensionData<'a> {
         #[serde(borrow)]
         on_response_received_endpoints: Vec<ReceivedEndpoint<'a>>,
+        framework_updates: comments::FrameworkUpdates<'a>,
     }
 
     #[derive(Debug, Deserialize)]
@@ -339,6 +356,73 @@ pub mod initial_comments {
         pub struct CommentsItemRenderer<'a> {
             #[serde(borrow)]
             pub continuation_endpoint: token::ContinuationEndpoint<'a>,
+        }
+    }
+
+    pub mod comments {
+        use serde::Deserialize;
+
+        #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        pub struct FrameworkUpdates<'a> {
+            #[serde(borrow)]
+            pub entity_batch_update: EntityBatchUpdate<'a>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        pub struct EntityBatchUpdate<'a> {
+            #[serde(borrow)]
+            pub mutations: Vec<Mutation<'a>>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        pub struct Mutation<'a> {
+            #[serde(borrow)]
+            pub payload: Payload<'a>,
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        pub struct Payload<'a> {
+            #[serde(borrow)]
+            pub comment_entity_payload: Option<comment_payload::CommentEntityPayload<'a>>,
+        }
+
+        pub mod comment_payload {
+            use serde::Deserialize;
+            use std::borrow::Cow;
+
+            #[derive(Debug, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct CommentEntityPayload<'a> {
+                #[serde(borrow)]
+                pub author: Author<'a>,
+                pub properties: Properties<'a>,
+            }
+
+            #[derive(Debug, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct Author<'a> {
+                #[serde(borrow)]
+                pub display_name: Cow<'a, str>,
+            }
+
+            #[derive(Debug, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct Properties<'a> {
+                #[serde(borrow)]
+                pub comment_id: Cow<'a, str>,
+                pub content: Content<'a>,
+            }
+
+            #[derive(Debug, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct Content<'a> {
+                #[serde(borrow)]
+                pub content: Cow<'a, str>,
+            }
         }
     }
 }
