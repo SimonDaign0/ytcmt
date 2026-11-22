@@ -19,8 +19,7 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
         innertube_key
     );
     let json_slice = parse_initial_data(html.as_str()).ok_or(Error::ParsingError)?;
-    let cmt_section =
-        serde_json::from_str::<SectionData>(json_slice).map_err(|_| Error::ParsingError)?;
+    let cmt_section = serde_json::from_str::<SectionData>(json_slice)?;
 
     let mut current_token = cmt_section.token().map(|s| s.to_string());
     let mut current_page = 1;
@@ -29,12 +28,8 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
         && current_page <= max_pages
     {
         let data = call_endpoint(client.clone(), &endpoint_url, video_id, &token).await?;
-        let ext_data =
-            serde_json::from_str::<ExtensionData>(&data).map_err(|_| Error::ParsingError)?;
+        let ext_data = serde_json::from_str::<ExtensionData>(&data)?;
 
-        if let Some(amt) = ext_data.replies_extension_header() {
-            println!("{} replies", amt);
-        }
         let reply_tokens = ext_data.reply_extension_tokens();
 
         let calls = reply_tokens
@@ -62,7 +57,6 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
         }
         current_page += 1;
     }
-
     Ok(())
 }
 

@@ -4,6 +4,8 @@ use thiserror::Error;
 pub enum Error {
     #[error("Invalid json field")]
     ParsingError,
-    #[error("Invalid request")]
+    #[error(transparent)]
     Request(#[from] wreq::Error),
+    #[error(transparent)]
+    DeserializingError(#[from] serde_json::Error),
 }
