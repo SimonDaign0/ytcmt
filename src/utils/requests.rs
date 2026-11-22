@@ -1,7 +1,9 @@
 use colored::Colorize;
+use futures::future::join_all;
 use wreq::Client;
 use wreq_util::Emulation;
 
+use crate::schema::reply::ReplyData;
 use crate::schema::{comments_extension::ExtensionData, comments_section::SectionData};
 
 use crate::error::Error;
@@ -30,16 +32,25 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
         let ext_data =
             serde_json::from_str::<ExtensionData>(&data).map_err(|_| Error::ParsingError)?;
 
-        println!("{}{}", "## Page: ".red(), current_page);
-        for comment in ext_data.comments() {
-            println!(
-                "- {}{}{}{}",
-                "Author: ".red(),
-                comment.author,
-                "Comment: ".red(),
-                comment.text
-            );
+        if let Some(amt) = ext_data.replies_extension_header() {
+            println!("{} replies", amt);
         }
+        let reply_tokens = ext_data.reply_extension_tokens();
+
+        let calls = reply_tokens
+            .into_iter()
+            .map(|tkn| call_endpoint(client.clone(), &endpoint_url, video_id, tkn));
+
+        let res = join_all(calls).await.into_iter().filter_map(|res| res.ok());
+
+        for data in res {
+            if let Ok(data) = serde_json::from_str::<ReplyData>(&data) {
+                data.print_comments();
+            };
+        }
+
+        println!("{}{}", "## Page: ".red(), current_page);
+        ext_data.print_comments();
 
         let next_token = ext_data.extention_token();
         match next_token {

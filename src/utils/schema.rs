@@ -89,6 +89,7 @@ pub mod comments_section {
 
 pub mod comments_extension {
     use crate::schema::Comment;
+    use colored::Colorize;
     use serde::Deserialize;
 
     impl<'a> ExtensionData<'a> {
@@ -195,6 +196,18 @@ pub mod comments_extension {
                         text: pl.properties.content.content.as_ref(),
                     })
                 })
+        }
+
+        pub fn print_comments(&'a self) {
+            for comment in self.comments() {
+                println!(
+                    "- {}{}{}{}",
+                    "Author: ".red(),
+                    comment.author,
+                    "Comment: ".red(),
+                    comment.text
+                );
+            }
         }
     }
 
@@ -424,6 +437,96 @@ pub mod comments_extension {
                 pub content: Cow<'a, str>,
             }
         }
+    }
+}
+
+pub mod reply {
+    use crate::schema::{Comment, comments_extension::comments, token};
+    use colored::Colorize;
+    use serde::Deserialize;
+
+    impl<'a> ReplyData<'a> {
+        pub fn comments(&'a self) -> impl Iterator<Item = Comment<'a>> {
+            self.framework_updates
+                .entity_batch_update
+                .mutations
+                .iter()
+                .filter_map(|muta| {
+                    let pl = muta.payload.comment_entity_payload.as_ref()?;
+                    Some(Comment {
+                        id: pl.properties.comment_id.as_ref(),
+                        author: pl.author.display_name.as_ref(),
+                        text: pl.properties.content.content.as_ref(),
+                    })
+                })
+        }
+        pub fn print_comments(&'a self) {
+            for comment in self.comments() {
+                println!(
+                    "- {}{}{}{}",
+                    "Author: ".red(),
+                    comment.author,
+                    "Comment: ".red(),
+                    comment.text
+                );
+            }
+        }
+    }
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ReplyData<'a> {
+        #[serde(borrow)]
+        pub on_response_received_endpoints: Vec<ReceivedEndpoint<'a>>,
+        pub framework_updates: comments::FrameworkUpdates<'a>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ReceivedEndpoint<'a> {
+        #[serde(borrow)]
+        pub append_continuation_items_action: AppendContinuationItemsAction<'a>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct AppendContinuationItemsAction<'a> {
+        #[serde(borrow)]
+        pub continuation_items: Vec<ContinuationItem<'a>>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ContinuationItem<'a> {
+        #[serde(borrow)]
+        pub continuation_item_renderer: Option<ContinuationItemRenderer<'a>>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ContinuationItemRenderer<'a> {
+        #[serde(borrow)]
+        pub button: Button<'a>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Button<'a> {
+        #[serde(borrow)]
+        pub button_renderer: ButtonRenderer<'a>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct ButtonRenderer<'a> {
+        #[serde(borrow)]
+        pub command: Command<'a>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Command<'a> {
+        #[serde(borrow)]
+        pub continuation_command: token::ContinuationCommand<'a>,
     }
 }
 

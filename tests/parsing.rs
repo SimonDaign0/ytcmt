@@ -1,5 +1,7 @@
 // .json files need to be created by the tester
-use ytcmt::schema::{comments_extension::ExtensionData, comments_section::SectionData};
+use ytcmt::schema::{
+    comments_extension::ExtensionData, comments_section::SectionData, reply::ReplyData,
+};
 
 #[test]
 fn get_comment_section_token() {
@@ -45,5 +47,9 @@ fn get_comments() {
 
     let comments_data = include_str!("comments.json");
     let ext_data = serde_json::from_str::<ExtensionData>(comments_data).unwrap();
+    assert!(ext_data.comments().count() > 0);
+
+    let comments_data = include_str!("reply.json");
+    let ext_data = serde_json::from_str::<ReplyData>(comments_data).unwrap();
     assert!(ext_data.comments().count() > 0);
 }
