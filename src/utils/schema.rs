@@ -89,7 +89,6 @@ pub mod comments_section {
 
 pub mod comments_extension {
     use crate::schema::Comment;
-    use colored::Colorize;
     use serde::Deserialize;
 
     impl<'a> ExtensionData<'a> {
@@ -196,18 +195,6 @@ pub mod comments_extension {
                         text: pl.properties.content.content.as_ref(),
                     })
                 })
-        }
-
-        pub fn print_comments(&'a self) {
-            for comment in self.comments() {
-                println!(
-                    "- {}{}{}{}",
-                    "Author: ".red(),
-                    comment.author,
-                    "Comment: ".red(),
-                    comment.text
-                );
-            }
         }
     }
 
@@ -442,7 +429,6 @@ pub mod comments_extension {
 
 pub mod reply {
     use crate::schema::{Comment, comments_extension::comments, token};
-    use colored::Colorize;
     use serde::Deserialize;
 
     impl<'a> ReplyData<'a> {
@@ -459,17 +445,6 @@ pub mod reply {
                         text: pl.properties.content.content.as_ref(),
                     })
                 })
-        }
-        pub fn print_comments(&'a self) {
-            for comment in self.comments() {
-                println!(
-                    "- {}{}{}{}",
-                    "Author: ".red(),
-                    comment.author,
-                    "Comment: ".red(),
-                    comment.text
-                );
-            }
         }
     }
     #[derive(Debug, Deserialize)]

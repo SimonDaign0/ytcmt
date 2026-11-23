@@ -10,10 +10,12 @@ cargo run --release
 ```
 
 > [!NOTE]
-> This tool is under development. If you want to pull comments from a specific video, change the `VID_ID` env variable
+> This tool is under development.
 >
-> **example** `https://www.youtube.com/watch?v=dQw4w9WgXcQ&start_radio=1`
+> **usage example**
 >
 > ```sh
-> VID_ID=dQw4w9WgXcQ cargo run --release
+> cargo run --release -- -m 6 "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1"
 > ```
+>
+> Curently, the output will be created in `/comments.json`
