@@ -1,3 +1,6 @@
+use serde::Serialize;
+
+#[derive(Serialize)]
 pub struct Comment<'a> {
     pub id: &'a str,
     pub author: &'a str,

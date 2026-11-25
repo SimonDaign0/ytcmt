@@ -1,11 +1,11 @@
 use futures::future::join_all;
+use tokio::task::{JoinHandle, JoinSet};
 use wreq::Client;
 use wreq_util::Emulation;
 
-use std::sync::Arc;
-use tokio::fs::OpenOptions;
-use tokio::io::{AsyncWriteExt, BufWriter};
-use tokio::sync::Mutex;
+use std::fs::OpenOptions;
+use std::io::{self, BufWriter, Write};
+use std::sync::{Arc, mpsc};
 
 use crate::schema::reply::ReplyData;
 use crate::schema::{comments_extension::ExtensionData, comments_section::SectionData};
@@ -24,15 +24,23 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
 
     let mut current_token = cmt_section.token().map(|s| s.to_string());
 
-    let output_file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open("comments.json")
-        .await?;
+    let (tx, rx) = mpsc::channel::<String>();
+    let w_handle = tokio::task::spawn_blocking(move || -> io::Result<()> {
+        let file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open("comments.json")?;
+        let mut w = BufWriter::new(file);
+        w.write_all(b"[")?;
 
-    let writer = Arc::new(Mutex::new(BufWriter::new(output_file)));
-    let mut handles = tokio::task::JoinSet::new();
+        while let Ok(data) = rx.recv() {
+            w.write_all(data.as_bytes())?;
+        }
+        Ok(())
+    });
+
+    let mut handles: JoinSet<Result<(), serde_json::Error>> = tokio::task::JoinSet::new();
 
     let endpoint_url: Arc<str> = format!(
         "https://www.youtube.com/youtubei/v1/next?key={}",
@@ -42,19 +50,11 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
 
     let mut current_page = 1;
 
-    let mut w = writer.lock().await;
-    w.write_all(b"[").await?;
-    let header = serde_json::json!({
-        "comment amount": 0,
-    })
-    .to_string();
-    w.write_all(header.as_bytes()).await?;
-    drop(w);
-
     while let Some(token) = current_token.as_mut()
         && current_page <= max_pages
     {
-        let data = call_endpoint(client.clone(), &endpoint_url, &video_id, &token).await?;
+        let data =
+            Arc::from(call_endpoint(client.clone(), &endpoint_url, &video_id, &token).await?);
 
         /* Temporary before all cases are handled. Currently not all comments are pulled */
         let ext_data = serde_json::from_str::<ExtensionData>(&data);
@@ -64,56 +64,63 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
         let ext_data = ext_data?;
         /* ------------------------------------------- */
 
-        let reply_tokens: Vec<String> = ext_data
-            .reply_extension_tokens()
-            .into_iter()
-            .map(|t| t.to_string())
-            .collect();
-
         let client_cl = client.clone();
         let url_cl = Arc::clone(&endpoint_url);
         let id_cl = Arc::clone(&video_id);
-        let writer_cl = Arc::clone(&writer);
+        let data_cl = Arc::clone(&data);
+        let tx_cl = tx.clone();
 
         handles.spawn(async move {
-            let calls = reply_tokens
-                .iter()
-                .map(|tkn| call_endpoint(client_cl.clone(), &url_cl, &id_cl, tkn));
+            let ext_data = serde_json::from_str::<ExtensionData>(&data_cl)?;
+            let reply_tokens = ext_data.reply_extension_tokens().into_iter();
 
-            let responses = join_all(calls).await.into_iter().filter_map(|res| res.ok());
+            let calls =
+                reply_tokens.map(|tkn| call_endpoint(client_cl.clone(), &url_cl, &id_cl, tkn));
 
-            let mut w = writer_cl.lock().await;
-            for res in responses.into_iter() {
-                if let Ok(data) = serde_json::from_str::<ReplyData>(&res) {
-                    for comment in data.comments() {
-                        let form = serde_json::json!({
-                            "author": comment.author,
-                            "text": comment.text,
-                        })
-                        .to_string();
-                        let _ = w.write_all(b",").await;
-                        let _ = w.write_all(form.as_bytes()).await;
+            let raw_responses: Vec<String> = join_all(calls)
+                .await
+                .into_iter()
+                .filter_map(Result::ok)
+                .collect();
+
+            let mut buf: Vec<u8> = Vec::new();
+            for body in raw_responses {
+                let Ok(rp_data) = serde_json::from_str::<ReplyData<'_>>(body.as_str()) else {
+                    continue;
+                };
+
+                for comment in rp_data.comments() {
+                    if serde_json::to_writer(&mut buf, &comment).is_ok() {
+                        buf.push(b',');
                     }
-                    let _ = w.write_all(b"\n").await;
                 }
             }
+
+            if !buf.is_empty() {
+                if let Ok(batch) = String::from_utf8(buf) {
+                    let _ = tx_cl.send(batch);
+                }
+            }
+            Ok(())
         });
 
         // cleans up some handles if they finished
         while handles.try_join_next().is_some() {}
 
-        let writer_cl = Arc::clone(&writer);
-        let mut w = writer_cl.lock().await;
-        for comment in ext_data.comments() {
-            let form = serde_json::json!({
-                "author": comment.author,
-                "text": comment.text,
-            })
-            .to_string();
-            let _ = w.write_all(b",").await;
-            let _ = w.write_all(form.as_bytes()).await;
+        let comments = ext_data.comments();
+
+        let mut buf: Vec<u8> = Vec::new();
+        for comment in comments {
+            if serde_json::to_writer(&mut buf, &comment).is_ok() {
+                buf.push(b',');
+            }
         }
-        let _ = w.write_all(b"\n").await;
+
+        if !buf.is_empty() {
+            if let Ok(batch) = String::from_utf8(buf) {
+                let _ = tx.send(batch);
+            }
+        }
 
         let next_token = ext_data.extention_token();
         match next_token {
@@ -125,12 +132,10 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
         }
         current_page += 1;
     }
+    drop(tx);
 
     while handles.join_next().await.is_some() {}
-
-    let mut w = writer.lock().await;
-    w.write_all(b"]").await?;
-    w.flush().await?;
+    let _ = w_handle.await;
     Ok(())
 }
 
