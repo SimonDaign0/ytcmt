@@ -32,7 +32,7 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
         .await?;
 
     let writer = Arc::new(Mutex::new(BufWriter::new(output_file)));
-    let mut handles = Vec::new();
+    let mut handles = tokio::task::JoinSet::new();
 
     let endpoint_url: Arc<str> = format!(
         "https://www.youtube.com/youtubei/v1/next?key={}",
@@ -75,7 +75,7 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
         let id_cl = Arc::clone(&video_id);
         let writer_cl = Arc::clone(&writer);
 
-        handles.push(tokio::spawn(async move {
+        handles.spawn(async move {
             let calls = reply_tokens
                 .iter()
                 .map(|tkn| call_endpoint(client_cl.clone(), &url_cl, &id_cl, tkn));
@@ -97,7 +97,10 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
                     let _ = w.write_all(b"\n").await;
                 }
             }
-        }));
+        });
+
+        // cleans up some handles if they finished
+        while handles.try_join_next().is_some() {}
 
         let writer_cl = Arc::clone(&writer);
         let mut w = writer_cl.lock().await;
@@ -123,7 +126,8 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
         current_page += 1;
     }
 
-    join_all(handles).await;
+    while handles.join_next().await.is_some() {}
+
     let mut w = writer.lock().await;
     w.write_all(b"]").await?;
     w.flush().await?;
