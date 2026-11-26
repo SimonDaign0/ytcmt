@@ -5,7 +5,10 @@ use wreq_util::Emulation;
 
 use std::fs::OpenOptions;
 use std::io::{self, BufWriter, Write};
-use std::sync::{Arc, mpsc};
+use std::sync::{
+    Arc,
+    mpsc::{self, Receiver, Sender},
+};
 
 use crate::schema::reply::ReplyData;
 use crate::schema::{comments_extension::ExtensionData, comments_section::SectionData};
@@ -22,25 +25,8 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
     let json_slice = parse_initial_data(html.as_str()).ok_or(Error::ParsingError)?;
     let cmt_section = serde_json::from_str::<SectionData>(json_slice)?;
 
-    let mut current_token = cmt_section.token().map(|s| s.to_string());
-
     let (tx, rx) = mpsc::channel::<String>();
-    let w_handle = tokio::task::spawn_blocking(move || -> io::Result<()> {
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open("comments.json")?;
-        let mut w = BufWriter::new(file);
-        w.write_all(b"[")?;
-
-        while let Ok(data) = rx.recv() {
-            w.write_all(data.as_bytes())?;
-        }
-        Ok(())
-    });
-
-    let mut handles: JoinSet<Result<(), serde_json::Error>> = tokio::task::JoinSet::new();
+    let w_handle = writer(rx);
 
     let endpoint_url: Arc<str> = format!(
         "https://www.youtube.com/youtubei/v1/next?key={}",
@@ -48,93 +34,8 @@ pub async fn req_comments(video_id: &str, max_pages: usize) -> Result<(), Error>
     )
     .into();
 
-    let mut current_page = 1;
-
-    while let Some(token) = current_token.as_mut()
-        && current_page <= max_pages
-    {
-        let data =
-            Arc::from(call_endpoint(client.clone(), &endpoint_url, &video_id, &token).await?);
-
-        /* Temporary before all cases are handled. Currently not all comments are pulled */
-        let ext_data = serde_json::from_str::<ExtensionData>(&data);
-        if ext_data.is_err() {
-            break;
-        }
-        let ext_data = ext_data?;
-        /* ------------------------------------------- */
-
-        let client_cl = client.clone();
-        let url_cl = Arc::clone(&endpoint_url);
-        let id_cl = Arc::clone(&video_id);
-        let data_cl = Arc::clone(&data);
-        let tx_cl = tx.clone();
-
-        handles.spawn(async move {
-            let ext_data = serde_json::from_str::<ExtensionData>(&data_cl)?;
-            let reply_tokens = ext_data.reply_extension_tokens().into_iter();
-
-            let calls =
-                reply_tokens.map(|tkn| call_endpoint(client_cl.clone(), &url_cl, &id_cl, tkn));
-
-            let raw_responses: Vec<String> = join_all(calls)
-                .await
-                .into_iter()
-                .filter_map(Result::ok)
-                .collect();
-
-            let mut buf: Vec<u8> = Vec::new();
-            for body in raw_responses {
-                let Ok(rp_data) = serde_json::from_str::<ReplyData<'_>>(body.as_str()) else {
-                    continue;
-                };
-
-                for comment in rp_data.comments() {
-                    if serde_json::to_writer(&mut buf, &comment).is_ok() {
-                        buf.push(b',');
-                    }
-                }
-            }
-
-            if !buf.is_empty() {
-                if let Ok(batch) = String::from_utf8(buf) {
-                    let _ = tx_cl.send(batch);
-                }
-            }
-            Ok(())
-        });
-
-        // cleans up some handles if they finished
-        while handles.try_join_next().is_some() {}
-
-        let comments = ext_data.comments();
-
-        let mut buf: Vec<u8> = Vec::new();
-        for comment in comments {
-            if serde_json::to_writer(&mut buf, &comment).is_ok() {
-                buf.push(b',');
-            }
-        }
-
-        if !buf.is_empty() {
-            if let Ok(batch) = String::from_utf8(buf) {
-                let _ = tx.send(batch);
-            }
-        }
-
-        let next_token = ext_data.extention_token();
-        match next_token {
-            Some(tkn) => {
-                token.clear();
-                token.push_str(tkn);
-            }
-            None => current_token = None,
-        }
-        current_page += 1;
-    }
-    drop(tx);
-
-    while handles.join_next().await.is_some() {}
+    let current_token = cmt_section.token().map(|s| s.to_string());
+    process_tokens(current_token, tx, client, max_pages, endpoint_url, video_id).await?;
     let _ = w_handle.await;
     Ok(())
 }
@@ -224,4 +125,121 @@ fn wrap_brace<'a>(slice: &'a str) -> Option<&'a str> {
         }
     }
     None
+}
+
+async fn writer(rx: Receiver<String>) -> JoinHandle<io::Result<()>> {
+    tokio::task::spawn_blocking(move || -> io::Result<()> {
+        let file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open("comments.json")?;
+        let mut w = BufWriter::new(file);
+        w.write_all(b"[")?;
+
+        while let Ok(data) = rx.recv() {
+            w.write_all(data.as_bytes())?;
+        }
+        w.write_all(b"{}]")?;
+        Ok(())
+    })
+}
+
+async fn process_tokens(
+    token: Option<String>,
+    tx: Sender<String>,
+    client: Client,
+    max_pages: usize,
+    endpoint_url: Arc<str>,
+    video_id: Arc<str>,
+) -> Result<(), Error> {
+    let mut handles: JoinSet<Result<(), serde_json::Error>> = tokio::task::JoinSet::new();
+    let mut current_token = token;
+    let mut current_page = 1;
+    // tx
+    while let Some(token) = current_token.as_mut()
+        && current_page <= max_pages
+    {
+        let data =
+            Arc::from(call_endpoint(client.clone(), &endpoint_url, &video_id, &token).await?);
+
+        /* Temporary before all cases are handled. Currently not all comments are pulled */
+        let ext_data = serde_json::from_str::<ExtensionData>(&data);
+        if ext_data.is_err() {
+            break;
+        }
+        let ext_data = ext_data?;
+        /* ------------------------------------------- */
+
+        let client_cl = client.clone();
+        let url_cl = Arc::clone(&endpoint_url);
+        let id_cl = Arc::clone(&video_id);
+        let data_cl = Arc::clone(&data);
+        let tx_cl = tx.clone();
+
+        handles.spawn(async move {
+            let ext_data = serde_json::from_str::<ExtensionData>(&data_cl)?;
+            let reply_tokens = ext_data.reply_extension_tokens().into_iter();
+
+            let calls =
+                reply_tokens.map(|tkn| call_endpoint(client_cl.clone(), &url_cl, &id_cl, tkn));
+
+            let raw_responses: Vec<String> = join_all(calls)
+                .await
+                .into_iter()
+                .filter_map(Result::ok)
+                .collect();
+
+            let mut buf: Vec<u8> = Vec::new();
+            for body in raw_responses {
+                let Ok(rp_data) = serde_json::from_str::<ReplyData<'_>>(body.as_str()) else {
+                    continue;
+                };
+
+                for comment in rp_data.comments() {
+                    if serde_json::to_writer(&mut buf, &comment).is_ok() {
+                        buf.push(b',');
+                    }
+                }
+            }
+
+            if !buf.is_empty() {
+                if let Ok(batch) = String::from_utf8(buf) {
+                    let _ = tx_cl.send(batch);
+                }
+            }
+            Ok(())
+        });
+
+        // cleans up some handles if they finished
+        while handles.try_join_next().is_some() {}
+
+        let comments = ext_data.comments();
+
+        let mut buf: Vec<u8> = Vec::new();
+        for comment in comments {
+            if serde_json::to_writer(&mut buf, &comment).is_ok() {
+                buf.push(b',');
+            }
+        }
+
+        if !buf.is_empty() {
+            if let Ok(batch) = String::from_utf8(buf) {
+                let _ = tx.send(batch);
+            }
+        }
+
+        let next_token = ext_data.extention_token();
+        match next_token {
+            Some(tkn) => {
+                token.clear();
+                token.push_str(tkn);
+            }
+            None => current_token = None,
+        }
+        current_page += 1;
+    }
+
+    while handles.join_next().await.is_some() {}
+    Ok(())
 }
