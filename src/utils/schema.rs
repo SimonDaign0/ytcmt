@@ -1,3 +1,4 @@
+use clap::Parser;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -5,6 +6,17 @@ pub struct Comment<'a> {
     pub id: &'a str,
     pub author: &'a str,
     pub text: &'a str,
+}
+
+#[derive(Parser, Debug)]
+#[command(about = "A tool to pull youtube video comments")]
+pub struct Args {
+    /// the youtube video url e.g. -u "https://www.youtube.com/watch?v=dQw4w9WgXcQ&start_radio=1"
+    pub url: String,
+
+    /// max page count
+    #[arg(short, long, default_value_t = 6)]
+    pub max_pages: usize,
 }
 
 pub mod comments_section {
