@@ -1,7 +1,6 @@
-use crate::schema::Comment;
+use crate::schema::{Comment, token};
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::sync::{Arc, mpsc::Sender};
-use tokio::task::JoinSet;
 use wreq::Client;
 
 use crate::schema::comments_extension::ExtensionData;
@@ -57,7 +56,7 @@ pub async fn process_tokens(
     endpoint_url: Arc<str>,
     video_id: Arc<str>,
 ) -> Result<(), Error> {
-    let mut set: JoinSet<Result<(), serde_json::Error>> = tokio::task::JoinSet::new();
+    let mut set = tokio::task::JoinSet::new();
     let mut current_token = cmt_section_tkn;
     let mut current_page = 1;
 
@@ -77,24 +76,7 @@ pub async fn process_tokens(
         let data_cl = Arc::clone(&data);
         let tx_cl = tx.clone();
 
-        set.spawn(async move {
-            let ext_data = serde_json::from_str::<ExtensionData>(&data_cl)?;
-            let reply_tokens = ext_data.reply_extension_tokens().into_iter();
-
-            let calls =
-                reply_tokens.map(|tkn| call_endpoint(client_cl.clone(), &url_cl, &id_cl, tkn));
-
-            let mut in_flight: FuturesUnordered<_> = calls.into_iter().collect();
-            while let Some(res) = in_flight.next().await {
-                if let Ok(body) = res {
-                    if let Ok(comments) = serde_json::from_str::<ReplyData<'_>>(&body) {
-                        write_batch(&tx_cl, comments.comments());
-                    }
-                }
-            }
-
-            Ok(())
-        });
+        set.spawn(async move { process_extension_data(client_cl, url_cl, id_cl, data_cl, tx_cl) });
 
         // cleans up some handles if they finished
         while set.try_join_next().is_some() {}
@@ -131,4 +113,51 @@ fn write_batch<'a>(tx: &Sender<String>, comments: impl Iterator<Item = Comment<'
     if !batch.is_empty() {
         let _ = tx.send(batch);
     }
+}
+
+async fn process_extension_data(
+    client: Client,
+    url: Arc<str>,
+    video_id: Arc<str>,
+    data: Arc<str>,
+    tx: Sender<String>,
+) {
+    let Ok(ext_data) = serde_json::from_str::<ExtensionData>(&data) else {
+        return;
+    };
+    let mut in_flight = FuturesUnordered::new();
+
+    for tkn in ext_data.reply_extension_tokens() {
+        in_flight.push(process_reply(
+            &tx,
+            tkn.to_owned(),
+            client.clone(),
+            &url,
+            &video_id,
+        ));
+    }
+
+    while let Some(next_tkn) = in_flight.next().await {
+        if let Some(tkn) = next_tkn {
+            in_flight.push(process_reply(&tx, tkn, client.clone(), &url, &video_id));
+        }
+    }
+}
+
+async fn process_reply<'a>(
+    tx: &Sender<String>,
+    mut reply_tkn: String,
+    client: Client,
+    url: &str,
+    video_id: &str,
+) -> Option<String> {
+    let body = call_endpoint(client.clone(), &url, &video_id, &reply_tkn)
+        .await
+        .ok()?;
+    let reply_data = serde_json::from_str::<ReplyData<'_>>(&body).ok()?;
+    write_batch(&tx, reply_data.comments());
+    let next_token = reply_data.extention_token()?;
+    reply_tkn.clear();
+    reply_tkn.push_str(next_token);
+    Some(reply_tkn)
 }

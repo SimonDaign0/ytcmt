@@ -447,6 +447,27 @@ pub mod reply {
     use serde::Deserialize;
 
     impl<'a> ReplyData<'a> {
+        pub fn extention_token(&'a self) -> Option<&'a str> {
+            let tkn = self
+                .on_response_received_endpoints
+                .iter()
+                .flat_map(|nd_pt| {
+                    nd_pt
+                        .append_continuation_items_action
+                        .continuation_items
+                        .iter()
+                })
+                .last()?
+                .continuation_item_renderer
+                .as_ref()?
+                .button
+                .button_renderer
+                .command
+                .continuation_command
+                .token
+                .as_ref();
+            Some(tkn)
+        }
         pub fn comments(&'a self) -> impl Iterator<Item = Comment<'a>> {
             self.framework_updates
                 .entity_batch_update
