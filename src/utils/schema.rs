@@ -456,7 +456,7 @@ pub mod comments_extension {
 }
 
 pub mod reply {
-    use crate::schema::{Comment, comments_extension::comments, token};
+    use crate::schema::{Comment, comments_extension::comments};
     use serde::Deserialize;
 
     impl<'a> ReplyData<'a> {
@@ -470,9 +470,13 @@ pub mod reply {
                         .continuation_items
                         .iter()
                 })
+                .filter_map(|it| match it {
+                    ContinuationItem::ContinuationRenderer {
+                        continuation_item_renderer,
+                    } => Some(continuation_item_renderer),
+                    _ => None,
+                })
                 .last()?
-                .continuation_item_renderer
-                .as_ref()?
                 .button
                 .button_renderer
                 .command
@@ -480,6 +484,48 @@ pub mod reply {
                 .token
                 .as_ref();
             Some(tkn)
+        }
+
+        pub fn subthread_tokens(&'a self) -> Option<&'a str> {
+            let mut tokens = Vec::new();
+            let mut stack = Vec::new();
+
+            for nd_pt in &self.on_response_received_endpoints {
+                stack.extend(&nd_pt.append_continuation_items_action.continuation_items);
+            }
+
+            // 2. Process items until the stack is empty
+            while let Some(item) = stack.pop() {
+                match item {
+                    ContinuationItem::ThreadRenderer {
+                        comment_thread_renderer,
+                    } => {
+                        // Push all nested sub-thread items onto the stack
+                        let nested_items = comment_thread_renderer
+                            .replies
+                            .iter()
+                            .flat_map(|repl| &repl.comment_replies_renderer.sub_threads)
+                            .flat_map(|sub| &sub.continuation_items);
+
+                        stack.extend(nested_items);
+                    }
+                    ContinuationItem::ContinuationRenderer {
+                        continuation_item_renderer,
+                    } => {
+                        let token = continuation_item_renderer
+                            .button
+                            .button_renderer
+                            .command
+                            .continuation_command
+                            .token
+                            .as_ref();
+
+                        tokens.push(token);
+                    }
+                }
+            }
+
+            None
         }
         pub fn comments(&'a self) -> impl Iterator<Item = Comment<'a>> {
             self.framework_updates
@@ -519,38 +565,89 @@ pub mod reply {
     }
 
     #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct ContinuationItem<'a> {
-        #[serde(borrow)]
-        pub continuation_item_renderer: Option<ContinuationItemRenderer<'a>>,
+    #[serde(rename_all_fields = "camelCase")]
+    #[serde(untagged)]
+    pub enum ContinuationItem<'a> {
+        ThreadRenderer {
+            #[serde(borrow)]
+            comment_thread_renderer: continuation_item::CommentThreadRenderer<'a>,
+        },
+        ContinuationRenderer {
+            #[serde(borrow)]
+            continuation_item_renderer: continuation_item::ContinuationItemRenderer<'a>,
+        },
     }
 
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct ContinuationItemRenderer<'a> {
-        #[serde(borrow)]
-        pub button: Button<'a>,
-    }
+    //--------------------------------------------------------------
+    pub mod continuation_item {
+        pub use item_renderer::ContinuationItemRenderer;
+        pub use thread_renderer::CommentThreadRenderer;
 
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Button<'a> {
-        #[serde(borrow)]
-        pub button_renderer: ButtonRenderer<'a>,
-    }
+        pub mod thread_renderer {
+            use crate::schema::reply::ContinuationItem;
+            use serde::Deserialize;
 
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct ButtonRenderer<'a> {
-        #[serde(borrow)]
-        pub command: Command<'a>,
-    }
+            #[derive(Debug, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct CommentThreadRenderer<'a> {
+                #[serde(borrow)]
+                pub replies: Option<Replies<'a>>,
+            }
 
-    #[derive(Debug, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct Command<'a> {
-        #[serde(borrow)]
-        pub continuation_command: token::ContinuationCommand<'a>,
+            #[derive(Debug, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct Replies<'a> {
+                #[serde(borrow)]
+                pub comment_replies_renderer: CommentRepliesRenderer<'a>,
+            }
+
+            #[derive(Debug, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct CommentRepliesRenderer<'a> {
+                #[serde(borrow)]
+                pub sub_threads: Vec<SubThread<'a>>,
+            }
+
+            #[derive(Debug, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct SubThread<'a> {
+                #[serde(borrow)]
+                pub continuation_items: Vec<ContinuationItem<'a>>,
+            }
+        }
+
+        pub mod item_renderer {
+            use crate::schema::token;
+            use serde::Deserialize;
+
+            #[derive(Debug, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct ContinuationItemRenderer<'a> {
+                #[serde(borrow)]
+                pub button: Button<'a>,
+            }
+
+            #[derive(Debug, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct Button<'a> {
+                #[serde(borrow)]
+                pub button_renderer: ButtonRenderer<'a>,
+            }
+
+            #[derive(Debug, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct ButtonRenderer<'a> {
+                #[serde(borrow)]
+                pub command: Command<'a>,
+            }
+
+            #[derive(Debug, Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct Command<'a> {
+                #[serde(borrow)]
+                pub continuation_command: token::ContinuationCommand<'a>,
+            }
+        }
     }
 }
 
