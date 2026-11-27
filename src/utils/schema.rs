@@ -309,6 +309,7 @@ pub mod comments_extension {
             pub struct Replies<'a> {
                 #[serde(borrow)]
                 pub comment_replies_renderer: CommentRepliesRenderer<'a>,
+                pub sub_threads: Option<Vec<subthread::SubThread<'a>>>,
             }
 
             #[derive(Debug, Deserialize)]
@@ -332,6 +333,18 @@ pub mod comments_extension {
                 #[serde(borrow)]
                 pub continuation_endpoint: token::ContinuationEndpoint<'a>,
             }
+            pub mod subthread {
+                use crate::schema::comments_extension::ContinuationItem;
+                use serde::Deserialize;
+
+                #[derive(Debug, Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                pub struct SubThread<'a> {
+                    #[serde(borrow)]
+                    pub continuation: ContinuationItem<'a>,
+                }
+            }
+
             pub mod replies_header {
                 use serde::Deserialize;
                 use std::borrow::Cow;

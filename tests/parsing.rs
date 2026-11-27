@@ -50,6 +50,7 @@ fn get_comments() {
     assert!(ext_data.comments().count() > 0);
 
     let comments_data = include_str!("reply.json");
-    let ext_data = serde_json::from_str::<ReplyData>(comments_data).unwrap();
-    assert!(ext_data.comments().count() > 0);
+    let reply_data = serde_json::from_str::<ReplyData>(comments_data).unwrap();
+    assert!(reply_data.comments().count() > 0);
+    assert!(reply_data.extention_token().is_some());
 }

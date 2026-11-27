@@ -1,4 +1,4 @@
-use crate::schema::{Comment, token};
+use crate::schema::Comment;
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::sync::{Arc, mpsc::Sender};
 use wreq::Client;
@@ -24,7 +24,6 @@ async fn call_endpoint<'a>(
                 "gl": "US"
             }
         },
-        "videoId": video_id,
         "continuation": token
     });
 
@@ -76,7 +75,9 @@ pub async fn process_tokens(
         let data_cl = Arc::clone(&data);
         let tx_cl = tx.clone();
 
-        set.spawn(async move { process_extension_data(client_cl, url_cl, id_cl, data_cl, tx_cl) });
+        set.spawn(
+            async move { process_extension_data(client_cl, url_cl, id_cl, data_cl, tx_cl) }.await,
+        );
 
         // cleans up some handles if they finished
         while set.try_join_next().is_some() {}
@@ -155,7 +156,9 @@ async fn process_reply<'a>(
         .await
         .ok()?;
     let reply_data = serde_json::from_str::<ReplyData<'_>>(&body).ok()?;
+
     write_batch(&tx, reply_data.comments());
+
     let next_token = reply_data.extention_token()?;
     reply_tkn.clear();
     reply_tkn.push_str(next_token);
