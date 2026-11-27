@@ -131,36 +131,35 @@ async fn process_extension_data(
     for tkn in ext_data.reply_extension_tokens() {
         in_flight.push(process_reply(
             &tx,
-            tkn.to_owned(),
+            tkn.to_string(),
             client.clone(),
             &url,
             &video_id,
         ));
     }
 
-    while let Some(next_tkn) = in_flight.next().await {
-        if let Some(tkn) = next_tkn {
-            in_flight.push(process_reply(&tx, tkn, client.clone(), &url, &video_id));
+    while let Some(next_batch) = in_flight.next().await {
+        if let Some(tkns) = next_batch {
+            for tkn in tkns {
+                in_flight.push(process_reply(&tx, tkn, client.clone(), &url, &video_id));
+            }
         }
     }
 }
 
 async fn process_reply<'a>(
     tx: &Sender<String>,
-    mut reply_tkn: String,
+    tkn: String,
     client: Client,
     url: &str,
     video_id: &str,
-) -> Option<String> {
-    let body = call_endpoint(client.clone(), &url, &video_id, &reply_tkn)
+) -> Option<Vec<String>> {
+    let body = call_endpoint(client.clone(), &url, &video_id, &tkn)
         .await
         .ok()?;
     let reply_data = serde_json::from_str::<ReplyData<'_>>(&body).ok()?;
 
     write_batch(&tx, reply_data.comments());
 
-    let next_token = reply_data.extention_token()?;
-    reply_tkn.clear();
-    reply_tkn.push_str(next_token);
-    Some(reply_tkn)
+    Some(reply_data.subthread_tokens())
 }

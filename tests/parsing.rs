@@ -37,11 +37,14 @@ fn get_reply_extension_tokens() {
     let comments_data = include_str!("comments.json");
     let ext_data = serde_json::from_str::<ExtensionData>(comments_data).unwrap();
     assert!(ext_data.reply_extension_tokens().count() > 0);
-    println!("{:?}", ext_data);
 
     let comments_data = include_str!("reply.json");
     let reply_data = serde_json::from_str::<ReplyData>(comments_data).unwrap();
     assert!(reply_data.extention_token().is_some());
+
+    let comments_data = include_str!("reply.json");
+    let reply_data = serde_json::from_str::<ReplyData>(comments_data).unwrap();
+    assert!(reply_data.subthread_tokens().len() > 0);
 }
 
 #[test]

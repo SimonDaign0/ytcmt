@@ -486,7 +486,7 @@ pub mod reply {
             Some(tkn)
         }
 
-        pub fn subthread_tokens(&'a self) -> Option<&'a str> {
+        pub fn subthread_tokens(&'a self) -> Vec<String> {
             let mut tokens = Vec::new();
             let mut stack = Vec::new();
 
@@ -509,6 +509,7 @@ pub mod reply {
 
                         stack.extend(nested_items);
                     }
+
                     ContinuationItem::ContinuationRenderer {
                         continuation_item_renderer,
                     } => {
@@ -518,14 +519,15 @@ pub mod reply {
                             .command
                             .continuation_command
                             .token
-                            .as_ref();
+                            .to_string();
 
                         tokens.push(token);
                     }
+                    _ => {}
                 }
             }
 
-            None
+            tokens
         }
         pub fn comments(&'a self) -> impl Iterator<Item = Comment<'a>> {
             self.framework_updates
@@ -565,16 +567,23 @@ pub mod reply {
     }
 
     #[derive(Debug, Deserialize)]
-    #[serde(rename_all_fields = "camelCase")]
     #[serde(untagged)]
     pub enum ContinuationItem<'a> {
+        #[serde(rename_all = "camelCase")]
         ThreadRenderer {
             #[serde(borrow)]
             comment_thread_renderer: continuation_item::CommentThreadRenderer<'a>,
         },
+        #[serde(rename_all = "camelCase")]
         ContinuationRenderer {
             #[serde(borrow)]
             continuation_item_renderer: continuation_item::ContinuationItemRenderer<'a>,
+        },
+        #[serde(rename_all = "camelCase")]
+        CommentViewModel {
+            // Define `CommentViewModel<'a>` if you need reply fields, or use `serde::de::IgnoredAny`
+            // if you only care about continuation tokens and subthreads.
+            comment_view_model: serde::de::IgnoredAny,
         },
     }
 
@@ -582,7 +591,7 @@ pub mod reply {
     pub mod continuation_item {
         pub use item_renderer::ContinuationItemRenderer;
         pub use thread_renderer::CommentThreadRenderer;
-
+        //============================
         pub mod thread_renderer {
             use crate::schema::reply::ContinuationItem;
             use serde::Deserialize;
@@ -615,7 +624,7 @@ pub mod reply {
                 pub continuation_items: Vec<ContinuationItem<'a>>,
             }
         }
-
+        //=================================
         pub mod item_renderer {
             use crate::schema::token;
             use serde::Deserialize;
